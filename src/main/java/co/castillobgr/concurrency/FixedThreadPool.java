@@ -15,13 +15,13 @@ public class FixedThreadPool {
     private String name;
 
     // A list to keep a reference of threads.
-    private List<Thread> pool;
+    private Thread[] pool;
 
     public FixedThreadPool(int capacity, String name) {
         this.capacity = capacity;
         this.name = name;
 
-        pool = new ArrayList<Thread>();
+        pool = new Thread[capacity];
     }
 
     public FixedThreadPool(int capacity) {
@@ -31,25 +31,33 @@ public class FixedThreadPool {
     // Submit a new task to the pool.
     public boolean submit(Runnable r) {
         if (r == null) throw new IllegalArgumentException("r can't be null");
-        int poolSize = pool.size();
-        if (poolSize < capacity) {
-            Thread t = new Thread(r);
-            t.run();
-            pool.add(t);
-            return true;
-        }
-        else {
-            for (int i = 0; i < poolSize; i++) {
-                Thread current = pool.get(i);
-                // TODO: Check into Thread#getState()
-                if (!current.isAlive()) {
-                    Thread t = new Thread(r);
-                    t.run();
-                    pool.add(i, t);
-                    return true;
-                }
+
+        for (int i = 0; i < capacity; i++) {
+            Thread current = pool[i];
+            // TODO: Check into Thread#getState()
+            if (current == null || !current.isAlive()) {
+                Thread t = new Thread(r);
+                t.start();
+                pool[i] = t;
+                return true;
             }
-            return false;
         }
+        return false;
+    }
+
+    public int getCapacity() {
+        return capacity;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public int getAvailability() {
+        int availability = 0;
+        for (int i = 0; i < capacity; i++) {
+            if (pool[i] == null) availability += 1;
+        }
+        return availability;
     }
 }
