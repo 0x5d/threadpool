@@ -3,6 +3,7 @@ package co.castillobgr.concurrency;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 public class FixedThreadPool {
 
@@ -81,17 +82,25 @@ public class FixedThreadPool {
 
         private Thread thread;
 
+        private Exception thrown = null;
+
         Worker(Runnable task) {
             if (task == null) throw new IllegalArgumentException("task can't be null");
             this.task = task;
             // Look into Executors.defaultThreadFactory()
-            this.thread = new Thread(this.task);
+            this.thread = new Thread(this);
         }
 
         public void run() {
-            while (this.task != null || (this.task = backlog.poll()) != null) {
-                this.task.run();
-                this.task = null;
+            try {
+
+                while (this.task != null || (this.task = backlog.poll(maxIdleTime, TimeUnit.MILLISECONDS)) != null) {
+                    this.task.run();
+                    this.task = null;
+                }
+            }
+            catch (InterruptedException ie) {
+                this.thrown = ie;
             }
         }
     }
