@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class FixedThreadPool {
 
@@ -20,19 +21,17 @@ public class FixedThreadPool {
     private long maxIdleTime;
     // Queue of pending tasks.
     private BlockingQueue<Runnable> backlog;
-    // Maximum size of pending tasks queue.
-    private long maxBacklogSize;
     // A list to keep a reference of threads.
     private Worker[] pool;
+    // An atomic counter for busy threads.
+    private AtomicInteger busyThreads;
 
     public FixedThreadPool(int capacity, long maxIdleTime, BlockingQueue<Runnable> backlog, String name) {
         if (capacity < 0) throw new IllegalArgumentException("capacity can't be negative");
         if (maxIdleTime < 0) throw new IllegalArgumentException("maxIdleTime can't be negative");
-        if (maxBacklogSize < 0) throw new IllegalArgumentException("maxBacklogSize can't be negative");
         this.capacity = capacity;
         this.name = name;
         this.maxIdleTime = maxIdleTime;
-        this.maxBacklogSize = maxBacklogSize;
         this.backlog = backlog;
         this.pool = new Worker[capacity];
     }
@@ -42,9 +41,25 @@ public class FixedThreadPool {
     }
 
     // Submit a new task to the pool.
-    public boolean submit(Runnable r) {
-        if (r == null) throw new IllegalArgumentException("r can't be null");
+    public boolean submit(Runnable task) {
+        if (task == null) throw new IllegalArgumentException("r can't be null");
+        // Try and create a new worker if the pool isn't full.
+        boolean taskPlaced = placeTask(task);
+        if (taskPlaced) {
+            return taskPlaced;
+        }
+        // If the task wasn't placed, it's because the workers were all busy. However, it could happen that after
+        // checking they become available, so we check and try again.
+        else if (getAvailability() > 0) {
+            taskPlaced = placeTask(task);
+            if (taskPlaced) return taskPlaced;
+            else return backlog.offer(task);
+        }
+        // If there was no availability, we add the task to the backlog.
+        return backlog.offer(task);
+    }
 
+    private boolean placeTask(Runnable r) {
         for (int i = 0; i < this.capacity; i++) {
             Worker current = this.pool[i];
             // TODO: Check into Thread#getState()
@@ -55,9 +70,6 @@ public class FixedThreadPool {
                 return true;
             }
         }
-        // When we get here, it might happen that all Worker threads have stopped, so even though we add r to the
-        // backlog, it might not get picked up.
-        return backlog.offer(r);
     }
 
     public int getCapacity() {
@@ -69,11 +81,7 @@ public class FixedThreadPool {
     }
 
     public int getAvailability() {
-        int availability = 0;
-        for (int i = 0; i < capacity; i++) {
-            if (pool[i] == null || !pool[i].thread.isAlive()) availability += 1;
-        }
-        return availability;
+        return capacity - busyThreads.get();
     }
 
     private class Worker implements Runnable {
@@ -93,10 +101,11 @@ public class FixedThreadPool {
 
         public void run() {
             try {
-
                 while (this.task != null || (this.task = backlog.poll(maxIdleTime, TimeUnit.MILLISECONDS)) != null) {
+                    FixedThreadPool.this.busyThreads.incrementAndGet();
                     this.task.run();
                     this.task = null;
+                    FixedThreadPool.this.busyThreads.decrementAndGet();
                 }
             }
             catch (InterruptedException ie) {
