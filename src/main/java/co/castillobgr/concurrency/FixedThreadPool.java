@@ -2,7 +2,6 @@ package co.castillobgr.concurrency;
 
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -24,7 +23,7 @@ public class FixedThreadPool {
     // A list to keep a reference of threads.
     private Worker[] pool;
     // An atomic counter for busy threads.
-    private AtomicInteger busyThreads;
+    private AtomicInteger busyWorkers;
 
     public FixedThreadPool(int capacity, long maxIdleTime, BlockingQueue<Runnable> backlog, String name) {
         if (capacity < 0) throw new IllegalArgumentException("capacity can't be negative");
@@ -34,6 +33,8 @@ public class FixedThreadPool {
         this.maxIdleTime = maxIdleTime;
         this.backlog = backlog;
         this.pool = new Worker[capacity];
+        this.busyWorkers = new AtomicInteger();
+        busyWorkers.set(0);
     }
 
     public FixedThreadPool(int capacity, BlockingQueue<Runnable> backlog) {
@@ -44,17 +45,10 @@ public class FixedThreadPool {
     public boolean submit(Runnable task) {
         if (task == null) throw new IllegalArgumentException("r can't be null");
         // Try and create a new worker if the pool isn't full.
-        boolean taskPlaced = placeTask(task);
-        if (taskPlaced) {
-            return taskPlaced;
-        }
+        if (placeTask(task)) return true;
         // If the task wasn't placed, it's because the workers were all busy. However, it could happen that after
         // checking they become available, so we check and try again.
-        else if (getAvailability() > 0) {
-            taskPlaced = placeTask(task);
-            if (taskPlaced) return taskPlaced;
-            else return backlog.offer(task);
-        }
+        if (getAvailability() > 0) return placeTask(task);
         // If there was no availability, we add the task to the backlog.
         return backlog.offer(task);
     }
@@ -82,7 +76,11 @@ public class FixedThreadPool {
     }
 
     public int getAvailability() {
-        return capacity - busyThreads.get();
+        int availability = 0;
+        for (int i = 0; i < capacity; i++) {
+            if (pool[i] == null || !pool[i].thread.isAlive()) availability += 1;
+        }
+        return availability;
     }
 
     private class Worker implements Runnable {
@@ -102,11 +100,11 @@ public class FixedThreadPool {
 
         public void run() {
             try {
-                while (this.task != null || (this.task = backlog.poll(maxIdleTime, TimeUnit.MILLISECONDS)) != null) {
-                    FixedThreadPool.this.busyThreads.incrementAndGet();
+                while (this.task != null) {
+                    FixedThreadPool.this.busyWorkers.incrementAndGet();
                     this.task.run();
-                    this.task = null;
-                    FixedThreadPool.this.busyThreads.decrementAndGet();
+                    FixedThreadPool.this.busyWorkers.decrementAndGet();
+                    this.task = backlog.poll(maxIdleTime, TimeUnit.MILLISECONDS);
                 }
             }
             catch (InterruptedException ie) {

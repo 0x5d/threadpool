@@ -36,7 +36,6 @@ public class FixedThreadPoolTest {
 
         FixedThreadPool pool = new FixedThreadPool(2, new LinkedBlockingQueue<Runnable>(1));
         pool.submit(r);
-
         assertEquals(1, pool.getAvailability());
     }
 
